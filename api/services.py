@@ -47,7 +47,10 @@ class BhashiniService:
         logger.info(f"Bhashini service initialized with User ID: {self.user_id[:8]}... and API Key: {self.api_key[:8]}...")
     
     def get_pipeline_config(self, source_lang: str, target_lang: str) -> Dict[str, Any]:
-        """Get pipeline configuration from Bhashini"""
+        """
+        Get pipeline configuration from Bhashini.
+        The translation task is only included if source and target languages are different.
+        """
         try:
             logger.info(f"Getting Bhashini pipeline config for tasks: ['asr', 'translation']")
             
@@ -58,8 +61,8 @@ class BhashiniService:
                 'Content-Type': 'application/json'
             }
             
-            # Build pipeline tasks based on your working Colab code
-            tasks = [
+            # Build pipeline tasks dynamically
+            pipeline_tasks = [
                 {
                     "taskType": "asr",
                     "config": {
@@ -67,20 +70,25 @@ class BhashiniService:
                             "sourceLanguage": source_lang
                         }
                     }
-                },
-                {
-                    "taskType": "translation",
-                    "config": {
-                        "language": {
-                            "sourceLanguage": source_lang,
-                            "targetLanguage": target_lang
-                        }
-                    }
                 }
             ]
             
+            # Add translation task only if source and target languages are different
+            if source_lang != target_lang:
+                pipeline_tasks.append(
+                    {
+                        "taskType": "translation",
+                        "config": {
+                            "language": {
+                                "sourceLanguage": source_lang,
+                                "targetLanguage": target_lang
+                            }
+                        }
+                    }
+                )
+
             payload = {
-                "pipelineTasks": tasks,
+                "pipelineTasks": pipeline_tasks,
                 "pipelineRequestConfig": {
                     "pipelineId": self.pipeline_id
                 }
@@ -139,7 +147,7 @@ class BhashiniService:
                         if config['language']['sourceLanguage'] == source_lang:
                             asr_service = config
                             break
-                elif task_config['taskType'] == 'translation' and not translation_service:
+                elif task_config['taskType'] == 'translation' and not translation_service and source_lang != target_lang:
                     # Find service for language pair
                     for config in task_config['config']:
                         if (config['language']['sourceLanguage'] == source_lang and 
@@ -150,7 +158,8 @@ class BhashiniService:
             if not asr_service:
                 raise APIError(f"ASR service not found for language: {source_lang}", 500, "bhashini")
             
-            if not translation_service:
+            # The translation service is optional if source_lang == target_lang
+            if source_lang != target_lang and not translation_service:
                 raise APIError(f"Translation service not found for {source_lang} -> {target_lang}", 500, "bhashini")
             
             # Get compute endpoint and auth token
@@ -177,8 +186,11 @@ class BhashiniService:
                         "audioFormat": audio_format,
                         "samplingRate": 16000
                     }
-                },
-                {
+                }
+            ]
+
+            if translation_service:
+                pipeline_tasks.append({
                     "taskType": "translation",
                     "config": {
                         "language": {
@@ -187,8 +199,7 @@ class BhashiniService:
                         },
                         "serviceId": translation_service['serviceId']
                     }
-                }
-            ]
+                })
             
             # Build the compute payload exactly like your Colab code
             compute_payload = {
